@@ -4,7 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.26.0"  # Updated version
-egui = "0.26.0"    # Matching version
-iced = "0.13"		# main ui lib
+iced = "0.12"		# main ui lib
 dirs = "5"  # For home directory access
