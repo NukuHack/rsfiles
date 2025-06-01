@@ -1,0 +1,9 @@
+
+
+i would like these icons at the top :
+copy,paste,cut,delete,new(folder and if hold down for long then a txt file)
+if i hold down a file / folder for long enough i can rename it
+if i remove the extension from the file or add an extension to a folder it reverses the renaming
+other neat "limiting" qol features and error handling should be implemented
+
+next to the current "up" should be a "Back" and a "forward" so i would keep a list of what i visited last (like a 30 long history not more needed)
