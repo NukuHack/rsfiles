@@ -1,10 +1,11 @@
+use iced::widget::{button, mouse_area};
 use iced::{
-    alignment, keyboard,
+    alignment, keyboard, mouse,
     widget::{
-        button, checkbox, column, container, row, scrollable, scrollable::Viewport, text,
-        text_input, Column,
+        checkbox, column, container, row, scrollable, scrollable::Viewport, text, text_input,
+        Column,
     },
-    Alignment, Application, Command, Element, Length, Settings, Subscription, Theme,
+    Alignment, Application, Command, Element, Event, Length, Point, Settings, Subscription, Theme,
 };
 use std::{env, fs, path::PathBuf, time::SystemTime};
 
@@ -30,6 +31,14 @@ struct FileManager {
     cached_files: Option<(PathBuf, Vec<FileEntry>, SystemTime)>,
     columns: Columns,
     scroll_offset: f32,
+    popup: Option<PopupState>,
+    hovered_file: Option<PathBuf>,
+    mouse_position: Point,
+}
+
+#[derive(Debug, Clone)]
+struct PopupState {
+    file_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -40,10 +49,15 @@ enum Message {
     NavigateUp,
     NavigateHome,
     ToggleHidden,
-    FileSelected(PathBuf),
+    FileLeftClicked(PathBuf),
+    FileRightClicked(PathBuf),
+    FileHovered(PathBuf),
+    FileUnhovered,
     DeleteSelected,
     BackspacePressed,
     ScrollChanged(Viewport),
+    ClosePopup,
+    MouseMoved(Point),
 }
 
 impl Application for FileManager {
@@ -68,6 +82,9 @@ impl Application for FileManager {
                 cached_files: None,
                 columns: Columns::default(),
                 scroll_offset: 0.0,
+                popup: None,
+                hovered_file: None,
+                mouse_position: Point::ORIGIN,
             },
             Command::none(),
         )
@@ -114,15 +131,33 @@ impl Application for FileManager {
                 self.cached_files = None; // Refresh to show/hide files
                 Command::none()
             }
-            Message::FileSelected(path) => {
+            Message::FileLeftClicked(path) => {
                 if self.selected_file.as_ref() == Some(&path) {
+                    // Double-click behavior: navigate into directories
                     if path.is_dir() {
                         self.update_path(PathBuf::from(&path));
                     }
                     self.selected_file = None;
                 } else {
+                    // Single-click behavior: select the file
                     self.selected_file = Some(path);
                 }
+                Command::none()
+            }
+            Message::FileRightClicked(path) => {
+                self.popup = Some(PopupState { file_path: path });
+                Command::none()
+            }
+            Message::FileHovered(path) => {
+                self.hovered_file = Some(path);
+                Command::none()
+            }
+            Message::FileUnhovered => {
+                self.hovered_file = None;
+                Command::none()
+            }
+            Message::ClosePopup => {
+                self.popup = None;
                 Command::none()
             }
             Message::DeleteSelected => {
@@ -139,6 +174,10 @@ impl Application for FileManager {
                 self.scroll_offset = viewport.relative_offset().y;
                 Command::none()
             }
+            Message::MouseMoved(position) => {
+                self.mouse_position = position;
+                Command::none()
+            }
         }
     }
 
@@ -146,20 +185,39 @@ impl Application for FileManager {
         let control_panel = self.view_control_panel();
         let file_list = self.view_file_list();
 
-        column![control_panel, file_list]
+        let main_content = column![control_panel, file_list]
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+
+        // Add popup overlay if present
+        if let Some(popup_state) = &self.popup {
+            let popup = self.view_popup(popup_state);
+            // Use a simple overlay approach instead of stack widget
+            container(column![main_content, popup])
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            main_content.into()
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        keyboard::on_key_press(|key, _modifiers| {
-            if let keyboard::Key::Named(keyboard::key::Named::Backspace) = key {
-                Some(Message::BackspacePressed)
-            } else {
-                None
-            }
-        })
+        Subscription::batch([
+            keyboard::on_key_press(|key, _modifiers| {
+                if let keyboard::Key::Named(keyboard::key::Named::Backspace) = key {
+                    Some(Message::BackspacePressed)
+                } else {
+                    None
+                }
+            }),
+            iced::event::listen_with(|event, _status| match event {
+                Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::MouseMoved(position))
+                }
+                _ => None,
+            }),
+        ])
     }
 }
 
@@ -172,9 +230,10 @@ struct Columns {
 impl Columns {
     fn new() -> Self {
         Self {
-            name: 0.5, // 50% for name
-            date: 0.3, // 30% for date
-            size: 0.2, // 20% for size
+            name: 0.5,  // 50% for name
+            date: 0.25, // 25% for date
+            size: 0.2,  // 20% for size
+                        //rest is padding .
         }
     }
 }
@@ -463,16 +522,59 @@ impl FileManager {
             iced::theme::Container::Transparent
         };
 
-        button(
-            container(row_content)
-                .style(container_style)
-                .padding(4)
-                .width(Length::Fill),
+        let file_path = file.path.clone();
+
+        // Create the content container
+        let content_container = container(row_content)
+            .style(container_style)
+            .padding(4)
+            .width(Length::Fill);
+
+        // Use mouse_area to handle both left and right clicks properly
+        mouse_area(content_container)
+            .on_press(Message::FileLeftClicked(file_path.clone()))
+            .on_right_press(Message::FileRightClicked(file_path.clone()))
+            .on_enter(Message::FileHovered(file_path))
+            .on_exit(Message::FileUnhovered)
+            .into()
+    }
+
+    fn view_popup(&self, popup_state: &PopupState) -> Element<Message> {
+        let path = popup_state.file_path.to_string_lossy().to_string();
+        let dir = popup_state.file_path.is_dir();
+        let popup_content = container(
+            column![
+                text(format!(
+                    "Right-clicked {}:",
+                    if dir { "folder" } else { "file" }
+                ))
+                .style(iced::theme::Text::Color(iced::Color::from_rgb(
+                    0.8, 0.8, 0.9
+                ))),
+                text(path)
+                    .style(iced::theme::Text::Color(iced::Color::from_rgb(
+                        0.9, 0.9, 1.0
+                    )))
+                    .size(12),
+                row![
+                    button("Copy Path").padding(4),
+                    button("Properties").padding(4),
+                    button("Close").on_press(Message::ClosePopup).padding(4)
+                ]
+                .spacing(4)
+            ]
+            .spacing(8)
+            .padding(12),
         )
-        .style(iced::theme::Button::Text)
-        .width(Length::Fill)
-        .on_press(Message::FileSelected(file.path.clone()))
-        .into()
+        .style(iced::theme::Container::Box)
+        .padding(2);
+
+        container(popup_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into()
     }
 }
 
@@ -488,6 +590,9 @@ impl Clone for FileManager {
             cached_files: self.cached_files.clone(),
             columns: Columns::new(), // Reset to default
             scroll_offset: self.scroll_offset,
+            popup: None, // Reset popup state in clone
+            hovered_file: None,
+            mouse_position: Point::ORIGIN,
         }
     }
 }
