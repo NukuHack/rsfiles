@@ -4,5 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = "0.12"		# main ui lib
-dirs = "5"  # For home directory access
+iced = "0.12"
+# main ui lib
+dirs = "5"
+# For home directory access
+walkdir = "2.4"
+# for faster file and folder loading

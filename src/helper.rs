@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
 pub fn get_file_extension(path: &Path) -> Option<&str> {
     path.extension()?.to_str()
 }
 
-pub fn compare_paths(a: &PathBuf, b: &PathBuf) -> Ordering {
+pub fn compare_paths(a: &Path, b: &Path) -> Ordering {
     match (a.is_dir(), b.is_dir()) {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,

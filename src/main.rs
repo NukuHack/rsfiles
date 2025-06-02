@@ -7,7 +7,8 @@ use iced::{
     },
     Alignment, Application, Command, Element, Event, Length, Point, Settings, Subscription, Theme,
 };
-use std::{env, fs, path::PathBuf, time::SystemTime};
+use std::{env, fs, path::PathBuf, time::SystemTime, thread};
+use walkdir::WalkDir;
 
 mod helper;
 
@@ -34,6 +35,7 @@ struct FileManager {
     popup: Option<PopupState>,
     hovered_file: Option<PathBuf>,
     mouse_position: Point,
+    loading: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +61,7 @@ enum Message {
     ScrollChanged(Viewport),
     ClosePopup,
     MouseMoved(Point),
+    FilesLoaded(Result<Vec<FileEntry>, String>),
 }
 
 impl Application for FileManager {
@@ -73,6 +76,8 @@ impl Application for FileManager {
             .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
         let path_input = current_path.to_string_lossy().to_string();
 
+        let load_command = load_files_async(current_path.clone(), false);
+
         (
             Self {
                 current_path: current_path.clone(),
@@ -86,8 +91,9 @@ impl Application for FileManager {
                 popup: None,
                 hovered_file: None,
                 mouse_position: Point::ORIGIN,
+                loading: true,
             },
-            Command::none(),
+            load_command,
         )
     }
 
@@ -106,37 +112,74 @@ impl Application for FileManager {
                 Command::none()
             }
             Message::PathSubmitted => {
-                self.update_path(PathBuf::from(&self.path_input));
-                Command::none()
+                let new_path = PathBuf::from(&self.path_input);
+                if new_path.exists() && new_path.is_dir() {
+                    self.current_path = new_path;
+                    self.selected_file = None;
+                    self.error_message = None;
+                    self.path_input = self.current_path.to_string_lossy().to_string();
+                    self.cached_files = None;
+                    self.scroll_offset = 0.0;
+                    self.loading = true;
+                    load_files_async(self.current_path.clone(), self.show_hidden)
+                } else {
+                    self.error_message = Some("Invalid directory path".to_string());
+                    Command::none()
+                }
             }
             Message::Refresh => {
                 self.cached_files = None;
                 self.path_input = self.current_path.to_string_lossy().to_string();
                 self.error_message = None;
-                Command::none()
+                self.loading = true;
+                load_files_async(self.current_path.clone(), self.show_hidden)
             }
             Message::NavigateUp => {
                 if let Some(parent) = self.current_path.parent() {
-                    self.update_path(parent.to_path_buf());
+                    self.current_path = parent.to_path_buf();
+                    self.selected_file = None;
+                    self.error_message = None;
+                    self.path_input = self.current_path.to_string_lossy().to_string();
+                    self.cached_files = None;
+                    self.scroll_offset = 0.0;
+                    self.loading = true;
+                    load_files_async(self.current_path.clone(), self.show_hidden)
+                } else {
+                    Command::none()
                 }
-                Command::none()
             }
             Message::NavigateHome => {
                 if let Some(home) = dirs::home_dir() {
-                    self.update_path(home);
+                    self.current_path = home;
+                    self.selected_file = None;
+                    self.error_message = None;
+                    self.path_input = self.current_path.to_string_lossy().to_string();
+                    self.cached_files = None;
+                    self.scroll_offset = 0.0;
+                    self.loading = true;
+                    load_files_async(self.current_path.clone(), self.show_hidden)
+                } else {
+                    Command::none()
                 }
-                Command::none()
             }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
-                self.cached_files = None; // Refresh to show/hide files
-                Command::none()
+                self.cached_files = None;
+                self.loading = true;
+                load_files_async(self.current_path.clone(), self.show_hidden)
             }
             Message::FileLeftClicked(path) => {
                 if self.selected_file.as_ref() == Some(&path) {
                     // Double-click behavior: navigate into directories
                     if path.is_dir() {
-                        self.update_path(PathBuf::from(&path));
+                        self.current_path = path;
+                        self.selected_file = None;
+                        self.error_message = None;
+                        self.path_input = self.current_path.to_string_lossy().to_string();
+                        self.cached_files = None;
+                        self.scroll_offset = 0.0;
+                        self.loading = true;
+                        return load_files_async(self.current_path.clone(), self.show_hidden);
                     }
                     self.selected_file = None;
                 } else {
@@ -155,11 +198,6 @@ impl Application for FileManager {
             }
             Message::CopyToClipboard(text) => {
                 iced::clipboard::write(text)
-
-                /*match clipboard::write(text) {
-                    Ok(_) => Message::CopySuccess,
-                    Err(e) => Message::CopyError(format!("{:?}", e)),
-                }*/
             }
             Message::FileUnhovered => {
                 self.hovered_file = None;
@@ -170,14 +208,44 @@ impl Application for FileManager {
                 Command::none()
             }
             Message::DeleteSelected => {
-                self.delete_selected_file();
-                Command::none()
+                if let Some(selected) = &self.selected_file {
+                    self.error_message = None;
+                    let result = if selected.is_dir() {
+                        fs::remove_dir_all(selected)
+                    } else {
+                        fs::remove_file(selected)
+                    };
+
+                    if let Err(e) = result {
+                        self.error_message = Some(format!(
+                            "Error deleting {}: {}",
+                            if selected.is_dir() { "folder" } else { "file" },
+                            e
+                        ));
+                        Command::none()
+                    } else {
+                        self.selected_file = None;
+                        self.cached_files = None;
+                        self.loading = true;
+                        load_files_async(self.current_path.clone(), self.show_hidden)
+                    }
+                } else {
+                    Command::none()
+                }
             }
             Message::BackspacePressed => {
                 if let Some(parent) = self.current_path.parent() {
-                    self.update_path(parent.to_path_buf());
+                    self.current_path = parent.to_path_buf();
+                    self.selected_file = None;
+                    self.error_message = None;
+                    self.path_input = self.current_path.to_string_lossy().to_string();
+                    self.cached_files = None;
+                    self.scroll_offset = 0.0;
+                    self.loading = true;
+                    load_files_async(self.current_path.clone(), self.show_hidden)
+                } else {
+                    Command::none()
                 }
-                Command::none()
             }
             Message::ScrollChanged(viewport) => {
                 self.scroll_offset = viewport.relative_offset().y;
@@ -185,6 +253,23 @@ impl Application for FileManager {
             }
             Message::MouseMoved(position) => {
                 self.mouse_position = position;
+                Command::none()
+            }
+            Message::FilesLoaded(result) => {
+                self.loading = false;
+                match result {
+                    Ok(files) => {
+                        self.cached_files = Some((
+                            self.current_path.clone(),
+                            files,
+                            SystemTime::now(),
+                        ));
+                        self.error_message = None;
+                    }
+                    Err(error) => {
+                        self.error_message = Some(error);
+                    }
+                }
                 Command::none()
             }
         }
@@ -201,7 +286,6 @@ impl Application for FileManager {
         // Add popup overlay if present
         if let Some(popup_state) = &self.popup {
             let popup = self.view_popup(popup_state);
-            // Use a simple overlay approach instead of stack widget
             container(column![main_content, popup])
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -242,12 +326,11 @@ impl Columns {
             name: 50.0, // 50% for name
             date: 25.0, // 25% for date
             size: 20.0, // 20% for size
-                        //rest is padding .
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 struct FileEntry {
     path: PathBuf,
     display_name: String,
@@ -258,104 +341,8 @@ struct FileEntry {
 }
 
 impl FileManager {
-    fn update_path(&mut self, new_path: PathBuf) {
-        if new_path.exists() && new_path.is_dir() {
-            self.current_path = new_path;
-            self.selected_file = None;
-            self.error_message = None;
-            self.path_input = self.current_path.to_string_lossy().to_string();
-            self.cached_files = None;
-            self.scroll_offset = 0.0;
-        } else {
-            self.error_message = Some("Invalid directory path".to_string());
-        }
-    }
-
-    fn get_files(&mut self) -> Option<&Vec<FileEntry>> {
-        // Check if cache is still valid
-        if let Some((cached_path, _, timestamp)) = &self.cached_files {
-            if cached_path == &self.current_path {
-                if let Ok(metadata) = fs::metadata(&self.current_path) {
-                    if let Ok(modified) = metadata.modified() {
-                        if modified <= *timestamp {
-                            return self.cached_files.as_ref().map(|(_, files, _)| files);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Read directory and cache results
-        if let Ok(entries) = fs::read_dir(&self.current_path) {
-            let mut files = Vec::new();
-            let mut latest_modified = SystemTime::UNIX_EPOCH;
-
-            for entry in entries.filter_map(|e| e.ok()) {
-                if let Ok(metadata) = entry.metadata() {
-                    let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                    if modified > latest_modified {
-                        latest_modified = modified;
-                    }
-
-                    let path = entry.path();
-                    let display_name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    let is_hidden = display_name.starts_with('.');
-
-                    let modified_str = metadata
-                        .modified()
-                        .map(helper::format_time)
-                        .unwrap_or_else(|_| "Unknown".to_string());
-
-                    let size_str = if metadata.is_dir() {
-                        "".to_string()
-                    } else {
-                        helper::format_size(metadata.len())
-                    };
-
-                    files.push(FileEntry {
-                        path,
-                        display_name,
-                        is_dir: metadata.is_dir(),
-                        modified: modified_str,
-                        size: size_str,
-                        is_hidden,
-                    });
-                }
-            }
-
-            files.sort_by(|a, b| helper::compare_paths(&a.path, &b.path));
-            self.cached_files = Some((self.current_path.clone(), files, latest_modified));
-            self.cached_files.as_ref().map(|(_, files, _)| files)
-        } else {
-            self.error_message = Some("Could not read directory".to_string());
-            None
-        }
-    }
-
-    fn delete_selected_file(&mut self) {
-        if let Some(selected) = &self.selected_file {
-            self.error_message = None;
-            let result = if selected.is_dir() {
-                fs::remove_dir_all(selected)
-            } else {
-                fs::remove_file(selected)
-            };
-
-            if let Err(e) = result {
-                self.error_message = Some(format!(
-                    "Error deleting {}: {}",
-                    if selected.is_dir() { "folder" } else { "file" },
-                    e
-                ));
-            } else {
-                self.selected_file = None;
-                self.cached_files = None;
-            }
-        }
+    fn get_files(&self) -> Option<&Vec<FileEntry>> {
+        self.cached_files.as_ref().map(|(_, files, _)| files)
     }
 
     fn view_control_panel(&self) -> Element<Message> {
@@ -418,8 +405,22 @@ impl FileManager {
     }
 
     fn view_file_list(&self) -> Element<Message> {
-        let mut files_clone = self.clone();
-        let files: Vec<FileEntry> = match files_clone.get_files() {
+        if self.loading {
+            return container(
+                text("Loading...")
+                    .style(iced::theme::Text::Color(iced::Color::from_rgb(
+                        0.7, 0.7, 0.8,
+                    )))
+                    .size(16),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into();
+        }
+
+        let files: Vec<FileEntry> = match self.get_files() {
             Some(files) => files
                 .iter()
                 .filter(|f| self.show_hidden || !f.is_hidden)
@@ -527,13 +528,11 @@ impl FileManager {
 
         let file_path = file.path.clone();
 
-        // Create the content container
         let content_container = container(row_content)
             .style(container_style)
             .padding(4)
             .width(Length::Fill);
 
-        // Use mouse_area to handle both left and right clicks properly
         mouse_area(content_container)
             .on_press(Message::FileLeftClicked(file_path.clone()))
             .on_right_press(Message::FileRightClicked(file_path.clone()))
@@ -583,7 +582,86 @@ impl FileManager {
     }
 }
 
-// Clone implementation for FileManager (needed for mutable borrow in view_file_list)
+// Async file loading function using std::thread
+fn load_files_async(path: PathBuf, show_hidden: bool) -> Command<Message> {
+    Command::perform(
+        async move {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            
+            // Spawn a thread to do the blocking I/O work
+            thread::spawn(move || {
+                let result = load_directory_contents(&path, show_hidden);
+                let _ = sender.send(result);
+            });
+            
+            // Wait for the result in a non-blocking way
+            receiver.recv().unwrap_or_else(|_| Err("Thread communication failed".to_string()))
+        },
+        Message::FilesLoaded,
+    )
+}
+
+// Fast directory loading using walkdir (only reads immediate children)
+fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
+    let mut files = Vec::new();
+    
+    // Use walkdir with max_depth(1) to only read immediate children
+    // This is faster than fs::read_dir for large directories
+    let walker = WalkDir::new(path)
+        .max_depth(1)
+        .follow_links(false)
+        .sort_by(|a, b| helper::compare_paths(a.path(), b.path()));
+
+    for entry in walker {
+        let entry = entry.map_err(|e| format!("Error reading directory: {}", e))?;
+        
+        // Skip the root directory itself
+        if entry.path() == path {
+            continue;
+        }
+
+        let path = entry.path().to_path_buf();
+        let display_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        
+        let is_hidden = display_name.starts_with('.');
+        
+        // Skip hidden files if not showing them
+        if !show_hidden && is_hidden {
+            continue;
+        }
+
+        let metadata = entry.metadata()
+            .map_err(|e| format!("Error reading metadata for {}: {}", display_name, e))?;
+
+        let modified_str = metadata
+            .modified()
+            .map(helper::format_time)
+            .unwrap_or_else(|_| "Unknown".to_string());
+
+        let size_str = if metadata.is_dir() {
+            "".to_string()
+        } else {
+            helper::format_size(metadata.len())
+        };
+
+        files.push(FileEntry {
+            path,
+            display_name,
+            is_dir: metadata.is_dir(),
+            modified: modified_str,
+            size: size_str,
+            is_hidden,
+        });
+    }
+
+    Ok(files)
+}
+
+// Clone implementation for FileManager
 impl Clone for FileManager {
     fn clone(&self) -> Self {
         Self {
@@ -593,11 +671,12 @@ impl Clone for FileManager {
             path_input: self.path_input.clone(),
             show_hidden: self.show_hidden,
             cached_files: self.cached_files.clone(),
-            columns: Columns::new(), // Reset to default
+            columns: Columns::new(),
             scroll_offset: self.scroll_offset,
-            popup: None, // Reset popup state in clone
+            popup: None,
             hovered_file: None,
             mouse_position: Point::ORIGIN,
+            loading: self.loading,
         }
     }
 }
