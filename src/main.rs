@@ -52,6 +52,7 @@ enum Message {
     FileLeftClicked(PathBuf),
     FileRightClicked(PathBuf),
     FileHovered(PathBuf),
+    CopyToClipboard(String),
     FileUnhovered,
     DeleteSelected,
     BackspacePressed,
@@ -80,7 +81,7 @@ impl Application for FileManager {
                 path_input,
                 show_hidden: false,
                 cached_files: None,
-                columns: Columns::default(),
+                columns: Columns::new(),
                 scroll_offset: 0.0,
                 popup: None,
                 hovered_file: None,
@@ -151,6 +152,14 @@ impl Application for FileManager {
             Message::FileHovered(path) => {
                 self.hovered_file = Some(path);
                 Command::none()
+            }
+            Message::CopyToClipboard(text) => {
+                iced::clipboard::write(text)
+
+                /*match clipboard::write(text) {
+                    Ok(_) => Message::CopySuccess,
+                    Err(e) => Message::CopyError(format!("{:?}", e)),
+                }*/
             }
             Message::FileUnhovered => {
                 self.hovered_file = None;
@@ -230,17 +239,11 @@ struct Columns {
 impl Columns {
     fn new() -> Self {
         Self {
-            name: 0.5,  // 50% for name
-            date: 0.25, // 25% for date
-            size: 0.2,  // 20% for size
+            name: 50.0, // 50% for name
+            date: 25.0, // 25% for date
+            size: 20.0, // 20% for size
                         //rest is padding .
         }
-    }
-}
-
-impl Default for Columns {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -398,14 +401,14 @@ impl FileManager {
 
         let name_header = text("Name")
             .style(iced::theme::Text::Color(header_color))
-            .width(Length::FillPortion((self.columns.name * 100.0) as u16));
+            .width(Length::FillPortion(self.columns.name as u16));
         let date_header = text("Modified")
             .style(iced::theme::Text::Color(header_color))
-            .width(Length::FillPortion((self.columns.date * 100.0) as u16))
+            .width(Length::FillPortion(self.columns.date as u16))
             .horizontal_alignment(alignment::Horizontal::Center);
         let size_header = text("Size")
             .style(iced::theme::Text::Color(header_color))
-            .width(Length::FillPortion((self.columns.size * 100.0) as u16))
+            .width(Length::FillPortion(self.columns.size as u16))
             .horizontal_alignment(alignment::Horizontal::Right);
 
         row![name_header, date_header, size_header]
@@ -495,20 +498,20 @@ impl FileManager {
 
         let name = text(name_text)
             .style(iced::theme::Text::Color(text_color))
-            .width(Length::FillPortion((self.columns.name * 100.0) as u16));
+            .width(Length::FillPortion(self.columns.name as u16));
 
         let modified = text(file.modified)
             .style(iced::theme::Text::Color(iced::Color::from_rgb(
                 0.6, 0.6, 0.7,
             )))
-            .width(Length::FillPortion((self.columns.date * 100.0) as u16))
+            .width(Length::FillPortion(self.columns.date as u16))
             .horizontal_alignment(alignment::Horizontal::Center);
 
         let size = text(file.size)
             .style(iced::theme::Text::Color(iced::Color::from_rgb(
                 0.6, 0.6, 0.7,
             )))
-            .width(Length::FillPortion((self.columns.size * 100.0) as u16))
+            .width(Length::FillPortion(self.columns.size as u16))
             .horizontal_alignment(alignment::Horizontal::Right);
 
         let row_content = row![name, modified, size]
@@ -551,13 +554,15 @@ impl FileManager {
                 .style(iced::theme::Text::Color(iced::Color::from_rgb(
                     0.8, 0.8, 0.9
                 ))),
-                text(path)
+                text(&path)
                     .style(iced::theme::Text::Color(iced::Color::from_rgb(
                         0.9, 0.9, 1.0
                     )))
                     .size(12),
                 row![
-                    button("Copy Path").padding(4),
+                    button("Copy Path")
+                        .on_press(Message::CopyToClipboard((&path).to_string()))
+                        .padding(4),
                     button("Properties").padding(4),
                     button("Close").on_press(Message::ClosePopup).padding(4)
                 ]
