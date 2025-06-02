@@ -1,28 +1,17 @@
-use std::cmp::Ordering;
-use std::path::Path;
-use std::time::SystemTime;
+#[allow(unused_imports)]
+use iced::{
+    alignment, keyboard, mouse,
+    widget::{
+        button, checkbox, column, container, mouse_area, row, scrollable, scrollable::Viewport,
+        text, text_input, Column,
+    },
+    Alignment, Application, Command, Element, Event, Length, Point, Settings, Size, Subscription,
+    Theme,
+};
+#[allow(unused_imports)]
+use std::{env, fs, path::PathBuf, time::SystemTime};
 
-pub fn get_file_extension(path: &Path) -> Option<&str> {
-    path.extension()?.to_str()
-}
-
-pub fn compare_paths(a: &Path, b: &Path) -> Ordering {
-    match (a.is_dir(), b.is_dir()) {
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        _ => {
-            let ext_a = get_file_extension(a).unwrap_or("");
-            let ext_b = get_file_extension(b).unwrap_or("");
-            ext_a.cmp(ext_b).then_with(|| {
-                a.file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .cmp(b.file_name().unwrap().to_str().unwrap())
-            })
-        }
-    }
-}
+use super::*;
 
 pub fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
@@ -64,4 +53,75 @@ pub fn format_time(time: SystemTime) -> String {
     } else {
         "Just now".to_string()
     }
+}
+
+
+// Synchronous file loading for better performance on small directories
+pub fn load_files_sync(path: PathBuf, show_hidden: bool) -> Command<super::Message> {
+    Command::perform(
+        async move {
+            load_directory_contents(&path, show_hidden)
+        },
+        Message::FilesLoaded,
+    )
+}
+
+// Optimized directory loading
+pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<super::FileEntry>, String> {
+    let mut files = Vec::new();
+    
+    let entries = fs::read_dir(path)
+        .map_err(|e| format!("Error reading directory: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Error reading directory entry: {}", e))?;
+        let path = entry.path();
+        
+        let display_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        
+        let is_hidden = display_name.starts_with('.');
+        
+        // Skip hidden files if not showing them
+        if !show_hidden && is_hidden {
+            continue;
+        }
+
+        let metadata = entry.metadata()
+            .map_err(|e| format!("Error reading metadata for {}: {}", display_name, e))?;
+
+        let modified_str = metadata
+            .modified()
+            .map(helper::format_time)
+            .unwrap_or_else(|_| "Unknown".to_string());
+
+        let size_str = if metadata.is_dir() {
+            String::new()
+        } else {
+            helper::format_size(metadata.len())
+        };
+
+        files.push(FileEntry {
+            path,
+            display_name,
+            is_dir: metadata.is_dir(),
+            modified: modified_str,
+            size: size_str,
+            is_hidden,
+        });
+    }
+
+    // Sort files: directories first, then by name
+    files.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()),
+        }
+    });
+
+    Ok(files)
 }
