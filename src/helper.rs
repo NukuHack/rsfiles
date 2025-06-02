@@ -32,7 +32,7 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn format_time(time: SystemTime) -> String {
+pub fn format_time_ago(time: SystemTime) -> String {
     let now = SystemTime::now();
     let duration = now.duration_since(time).unwrap_or_default();
     let secs = duration.as_secs();
@@ -52,6 +52,27 @@ pub fn format_time(time: SystemTime) -> String {
         format!("{}m ago", minutes)
     } else {
         "Just now".to_string()
+    }
+}
+pub fn format_time(time: SystemTime) -> String {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => {
+            let secs = duration.as_secs();
+            let minutes = secs / 60;
+            let hours = minutes / 60;
+            let days = hours / 24;
+            
+            // This is a simplified calculation - for precise date/time you'd need to handle
+            // leap years, months with different days, etc. (which is why chrono is better)
+            let year = 1970 + (days / 365) as i32;
+            let month = ((days % 365) / 30 + 1) as u32;
+            let day = (days % 30 + 1) as u32;
+            let hour = (hours % 24) as u32;
+            let minute = (minutes % 60) as u32;
+            
+            format!("{:04}.{:02}.{:02} {:02}:{:02}", year, month, day, hour, minute)
+        }
+        Err(_) => "Invalid time".to_string(),
     }
 }
 

@@ -314,33 +314,6 @@ impl FileManager {
         }
     }
 
-    fn calculate_popup_position(&self, click_position: Point) -> Point {
-        const POPUP_WIDTH: f32 = 200.0;
-        const POPUP_HEIGHT: f32 = 120.0;
-        const MARGIN: f32 = 10.0;
-
-        let mut x = click_position.x;
-        let mut y = click_position.y;
-
-        // Adjust X position to keep popup within window bounds
-        if x + POPUP_WIDTH + MARGIN > self.window_size.width {
-            x = self.window_size.width - POPUP_WIDTH - MARGIN;
-        }
-        if x < MARGIN {
-            x = MARGIN;
-        }
-
-        // Adjust Y position to keep popup within window bounds
-        if y + POPUP_HEIGHT + MARGIN > self.window_size.height {
-            y = y - POPUP_HEIGHT - MARGIN;
-        }
-        if y < MARGIN {
-            y = MARGIN;
-        }
-
-        Point::new(x, y)
-    }
-
     fn get_files(&self) -> Option<&Vec<FileEntry>> {
         self.cached_files.as_ref().map(|(_, files, _)| files)
     }
@@ -358,12 +331,33 @@ impl FileManager {
             .spacing(8)
             .align_items(Alignment::Center);
 
+        let delete_button = if self.selected_file.is_some() {
+            button(
+                text("Delete").style(iced::theme::Text::Color(iced::Color::from_rgb(
+                    0.9, 0.9, 0.9,
+                ))),
+            )
+            .style(iced::theme::Button::Destructive)
+            .padding(8)
+            .on_press(Message::DeleteSelected)
+        } else {
+            button(
+                text("Delete").style(iced::theme::Text::Color(iced::Color::from_rgb(
+                    0.5, 0.5, 0.5,
+                ))),
+            )
+            .style(iced::theme::Button::Secondary)
+            .padding(8)
+        };
+
         let up_button = button("Up").on_press(Message::NavigateUp).padding(8);
+        /*let back_button = button("Back").on_press(Message::NavigateUp).padding(8);
+        let forw_button = button("Forward").on_press(Message::NavigateUp).padding(8);*/
         let home_button = button("Home").on_press(Message::NavigateHome).padding(8);
         let hidden_checkbox =
             checkbox("Show hidden", self.show_hidden).on_toggle(|_| Message::ToggleHidden);
 
-        let nav_row = row![up_button, home_button, hidden_checkbox]
+        let nav_row = row![delete_button, up_button, home_button, hidden_checkbox]
             .spacing(8)
             .align_items(Alignment::Center);
 
@@ -454,33 +448,12 @@ impl FileManager {
         .spacing(4)
         .width(Length::Fill);
 
-        let delete_button = if self.selected_file.is_some() {
-            button(
-                text("Delete").style(iced::theme::Text::Color(iced::Color::from_rgb(
-                    0.9, 0.9, 0.9,
-                ))),
-            )
-            .style(iced::theme::Button::Destructive)
-            .width(Length::Fill)
-            .padding(8)
-            .on_press(Message::DeleteSelected)
-        } else {
-            button(
-                text("Delete").style(iced::theme::Text::Color(iced::Color::from_rgb(
-                    0.5, 0.5, 0.5,
-                ))),
-            )
-            .style(iced::theme::Button::Secondary)
-            .width(Length::Fill)
-            .padding(8)
-        };
-
         let scrollable_content = scrollable(file_rows)
             .width(Length::Fill)
             .height(Length::Fill)
             .on_scroll(Message::ScrollChanged);
 
-        column![scrollable_content, delete_button]
+        column![scrollable_content]
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(8)
@@ -553,7 +526,7 @@ impl FileManager {
         let path = popup_state.file_path.to_string_lossy().to_string();
         let is_dir = popup_state.file_path.is_dir();
 
-        // Create the popup content with better styling
+        // Create the popup content
         let popup_content = container(
             column![
                 text(format!("{}:", if is_dir { "Folder" } else { "File" }))
@@ -591,25 +564,53 @@ impl FileManager {
         .width(Length::Shrink)
         .height(Length::Shrink);
 
-        // Create a full-screen overlay that can be clicked to dismiss
-        let overlay_background = mouse_area(
-            container(
-                container(popup_content)
-                    .style(iced::theme::Container::Transparent)
-                    .padding([
-                        popup_state.position.y as u16,
-                        0,
-                        0,
-                        popup_state.position.x as u16,
-                    ]),
-            )
+        // Position the popup using padding (as you were doing)
+        let positioned_popup = container(popup_content)
+            .width(Length::Shrink)
+            .height(Length::Shrink)
+            .style(iced::theme::Container::Transparent)
+            .padding([
+                popup_state.position.y as u16,
+                0,
+                0,
+                popup_state.position.x as u16,
+            ]);
+
+        // Create the overlay
+        let overlay = container(positioned_popup)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(iced::theme::Container::Custom(Box::new(OverlayStyle))),
-        )
-        .on_press(Message::OverlayClicked);
+            .style(iced::theme::Container::Custom(Box::new(OverlayStyle)));
 
-        overlay_background.into()
+        // Make the overlay clickable to dismiss
+        mouse_area(overlay).on_press(Message::OverlayClicked).into()
+    }
+
+    fn calculate_popup_position(&self, click_position: Point) -> Point {
+        const POPUP_WIDTH: f32 = 200.0;
+        const POPUP_HEIGHT: f32 = 120.0;
+        const MARGIN: f32 = 10.0;
+
+        let mut x = click_position.x;
+        let mut y = click_position.y;
+
+        // Adjust X position to keep popup within window bounds
+        if x + POPUP_WIDTH > self.window_size.width {
+            x = self.window_size.width - POPUP_WIDTH - MARGIN;
+        }
+        if x < MARGIN {
+            x = MARGIN;
+        }
+
+        // Adjust Y position to keep popup within window bounds
+        if y + POPUP_HEIGHT > self.window_size.height {
+            y = self.window_size.height - POPUP_HEIGHT - MARGIN;
+        }
+        if y < MARGIN {
+            y = MARGIN;
+        }
+
+        Point::new(x, y - self.window_size.height / 2.0) // Add back the control panel height for final position
     }
 }
 

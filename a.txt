@@ -1,9 +1,65 @@
 
 
-i would like these icons at the top :
-copy,paste,cut,delete,new(folder and if hold down for long then a txt file)
-if i hold down a file / folder for long enough i can rename it
-if i remove the extension from the file or add an extension to a folder it reverses the renaming
-other neat "limiting" qol features and error handling should be implemented
+i would like these buttons at the top :
+copy,paste,cut,new(folder and if hold down for long then a txt file) (if possible making a new file/folder will instantly go into renaming it)
 
-next to the current "up" should be a "Back" and a "forward" so i would keep a list of what i visited last (like a 30 long history not more needed)
+if i hold down a file / folder for long enough i can rename it
+if i remove the extension from the file or add an extension to a folder it reverses the renaming and other neat "limiting" qol features and error handling should be implemented
+
+next to the current "up" should be a "Back" and a "forward" so i would keep a list of what i visited last (like a 50 long history not more needed) (and make mouse button 4,and 5 as macro for those buttons)
+
+make the popup correctly placed and not make a black overlay to the files
+make the popup have rename copy a paste (what is disabled if there is nothing to paste) a delete and if possible at the top an "Open" to open with the default stuff
+
+make the folder open only happen in quick double clicks not on every second click
+
+make the time function selectable
+
+make the path not reload the files if the path is the same as it was
+
+make the path open the file if it's pointing to an existing file (and even if there is no extension for the file)
+
+make Shift clicking on something paste it to the path and if it's a folder just open it but if it's a file enter the path so the user has to press an enter to run the action actually
+
+rightclicking the path would bring up a different menu with like Up,Back,Forward (default disabled only if the user used back will it have a meaning) and "open CMD here" and open recycle bin
+
+using F5 would trigger the reloading
+
+pulling a string onto the path textbox with the cursor would past it into the path
+and the user would be able to pull the path as a string out from the path textbox
+
+
+
+
+
+AI suggestions :
+
+"Favorite Folders" or "Pinned Locations" – Quick access to frequently used directories.
+"Recent Files/Folders" – A dropdown or sidebar section showing recently accessed items.
+Undo last operation (Ctrl+Z) – Revert accidental deletions/moves/renames.
+Multi-select with Shift/Ctrl + Click – Standard behavior for batch operations.
+Drag & Drop support – Move/copy files by dragging them between folders or into the explorer.
+"Duplicate File" option – Create a copy with (1), (2), etc., appended to the name.
+"Open With" context menu – Right-click → "Open With" → Choose an alternative program.
+"Search as you type" – Instant filtering of files/folders while typing in the current directory.
+Sorting options – By name, date, size, type (with a toggle for ascending/descending).
+"Quick Access" sidebar – Shortcuts to Desktop, Downloads, Documents, etc.
+"File Tags" or "Color Labels" – Custom metadata for organization (like macOS tags).
+"Are you sure?" dialogs – For irreversible actions (deletion, overwriting files).
+"Skip/Replace All" – When copying/moving multiple files with conflicts.
+"Name collision handling" – Auto-rename instead of overwriting (e.g., file(1).txt).
+"Invalid rename protection" – Prevent renaming files to reserved names (CON, AUX, etc.).
+"Path too long" warning – Notify the user if a file path exceeds system limits.
+"Go to Parent Folder" Shortcut – e.g., Ctrl+Up to go up one level.
+"Folder Size Calculation" – Option to show folder sizes (with a warning for large folders).
+"Quick Filter" – Like Windows Explorer’s search box (e.g., *.txt or >100MB).
+Ctrl+Backspace – Delete the last word in the path bar.
+
+Keyboard Shortcuts
+F2 → Rename
+Ctrl+A → Select All
+Del → Move to Recycle Bin
+Shift+Del → Permanent Delete
+Ctrl+F → Search
+Alt+Left/Right → Back/Forward Navigation
+Ctrl+D → Bookmark current folder (if implementing favorites)
