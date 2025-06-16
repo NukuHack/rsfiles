@@ -10,3 +10,6 @@ dirs = "5"
 # For home directory access
 walkdir = "2.4"
 # for faster file and folder loading
+
+[package.metadata.windows]
+icon = "assets/icon.ico"

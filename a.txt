@@ -8,6 +8,8 @@ if i remove the extension from the file or add an extension to a folder it rever
 
 next to the current "up" should be a "Back" and a "forward" so i would keep a list of what i visited last (like a 50 long history not more needed) (and make mouse button 4,and 5 as macro for those buttons)
 
+make .ink files "open"-able so you can go to their directory
+
 make the popup correctly placed and not make a black overlay to the files
 make the popup have rename copy a paste (what is disabled if there is nothing to paste) a delete and if possible at the top an "Open" to open with the default stuff
 
