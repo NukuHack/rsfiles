@@ -1,3 +1,5 @@
+use crate::file_manager::FileEntry;
+use crate::file_manager::Message;
 #[allow(unused_imports)]
 use iced::{
     alignment, keyboard, mouse,
@@ -32,6 +34,7 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub fn format_time_ago(time: SystemTime) -> String {
     let now = SystemTime::now();
     let duration = now.duration_since(time).unwrap_or_default();
@@ -78,7 +81,7 @@ pub fn format_time(time: SystemTime) -> String {
 
 
 // Synchronous file loading for better performance on small directories
-pub fn load_files_sync(path: PathBuf, show_hidden: bool) -> Command<super::Message> {
+pub fn load_files_sync(path: PathBuf, show_hidden: bool) -> Command<Message> {
     Command::perform(
         async move {
             load_directory_contents(&path, show_hidden)
@@ -88,7 +91,7 @@ pub fn load_files_sync(path: PathBuf, show_hidden: bool) -> Command<super::Messa
 }
 
 // Optimized directory loading
-pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<super::FileEntry>, String> {
+pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
     let mut files = Vec::new();
     
     let entries = fs::read_dir(path)
@@ -125,22 +128,22 @@ pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<
             helper::format_size(metadata.len())
         };
 
-        files.push(FileEntry {
+        files.push(FileEntry::new(
             path,
             display_name,
-            is_dir: metadata.is_dir(),
-            modified: modified_str,
-            size: size_str,
+            metadata.is_dir(),
+            modified_str,
+            size_str,
             is_hidden,
-        });
+        ));
     }
 
     // Sort files: directories first, then by name
     files.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
+        match (a.is_dir(), b.is_dir()) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()),
+            _ => a.display_name().to_lowercase().cmp(&b.display_name().to_lowercase()),
         }
     });
 
