@@ -1,3 +1,6 @@
+// main.rs
+use crate::helper::Columns;
+use crate::helper::FileEntry;
 use super::*;
 use iced::widget::scrollable;
 use iced::widget::scrollable::Viewport;
@@ -8,7 +11,11 @@ use iced::{
     },
     Alignment, Application, Command, Element, Event, Length, Point, Size, Subscription, Theme,
 };
+use iced::mouse::Button;
 use std::{fs, path::PathBuf, time::SystemTime};
+use crate::helper::copy_dir_all;
+
+use super::popup::{Popup, PopupMessage, PopupState, OverlayStyle, calculate_popup_position};
 
 pub struct FileManager {
     current_path: PathBuf,
@@ -19,23 +26,19 @@ pub struct FileManager {
     cached_files: Option<(PathBuf, Vec<FileEntry>, SystemTime)>,
     columns: Columns,
     scroll_offset: f32,
-    popup: Option<PopupState>,
+    popup: Option<Popup>,
     hovered_file: Option<PathBuf>,
     mouse_position: Point,
     loading: bool,
     window_size: Size,
-    renaming_file: Option<PathBuf>,  // The file being renamed
-    rename_input: String,           // The new name input
-    rename_error: Option<String>,   // Error message for renaming
+    clipboard: Option<(PathBuf, bool)>, // (path, is_cut)
+    history: Vec<PathBuf>,
+    history_index: usize,
+    max_history: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct PopupState {
-    file_path: PathBuf,
-    position: Point,
-}
-
-#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     PathInputChanged(String),
     PathSubmitted,
@@ -47,19 +50,21 @@ pub enum Message {
     FileRightClicked(PathBuf, Point),
     FileHovered(PathBuf),
     CopyToClipboard(String),
+    CopySelected,
+    CutSelected,
+    PasteSelected,
     FileUnhovered,
     DeleteSelected,
     BackspacePressed,
     ScrollChanged(Viewport),
-    ClosePopup,
     MouseMoved(Point),
     FilesLoaded(Result<Vec<FileEntry>, String>),
     WindowResized(Size),
     OverlayClicked,
-    StartRename(PathBuf),
-    RenameInputChanged(String),
-    ConfirmRename,
-    CancelRename,
+    PopupMessage(PopupMessage),
+    NavigateBack,
+    NavigateForward,
+    MouseButtonPressed(mouse::Button),
 }
 
 impl Application for FileManager {
@@ -77,7 +82,7 @@ impl Application for FileManager {
 
         (
             Self {
-                current_path,
+                current_path: current_path.clone(),
                 selected_file: None,
                 error_message: None,
                 path_input,
@@ -90,9 +95,10 @@ impl Application for FileManager {
                 mouse_position: Point::ORIGIN,
                 loading: true,
                 window_size: Size::new(800.0, 600.0),
-                renaming_file: None,
-                rename_input: String::new(),
-                rename_error: None,
+                clipboard: None,
+                history: vec![current_path],
+                history_index: 0,
+                max_history: 50,
             },
             load_command,
         )
@@ -142,7 +148,6 @@ impl Application for FileManager {
             }
             Message::FileLeftClicked(path) => {
                 self.popup = None; // Close popup on any file interaction
-                self.cancel_rename(); // Cancel any active renaming
                 
                 if self.selected_file.as_ref() == Some(&path) {
                     if path.is_dir() {
@@ -154,11 +159,98 @@ impl Application for FileManager {
                 }
                 Command::none()
             }
+            Message::CopySelected => {
+                if let Some(selected) = &self.selected_file {
+                    self.clipboard = Some((selected.clone(), false));
+                    self.popup = None;
+                    Command::none()
+                } else {
+                    Command::none()
+                }
+            }
+            Message::CutSelected => {
+                if let Some(selected) = &self.selected_file {
+                    self.clipboard = Some((selected.clone(), true));
+                    self.popup = None;
+                    Command::none()
+                } else {
+                    Command::none()
+                }
+            }
+            Message::PasteSelected => {
+                if let Some((source_path, is_cut)) = &self.clipboard {
+                    let dest_path = self.current_path.join(source_path.file_name().unwrap());
+                    
+                    if *is_cut {
+                        // Move operation
+                        match fs::rename(source_path, &dest_path) {
+                            Ok(_) => {
+                                self.clipboard = None;
+                                self.refresh_current_directory()
+                            }
+                            Err(e) => {
+                                self.error_message = Some(format!("Error moving file: {}", e));
+                                Command::none()
+                            }
+                        }
+                    } else {
+                        // Copy operation
+                        let result = if source_path.is_dir() {
+                            copy_dir_all(source_path, &dest_path)
+                        } else {
+                            fs::copy(source_path, &dest_path).map(|_| ())
+                        };
+                        
+                        match result {
+                            Ok(_) => self.refresh_current_directory(),
+                            Err(e) => {
+                                self.error_message = Some(format!("Error copying file: {}", e));
+                                Command::none()
+                            }
+                        }
+                    }
+                } else {
+                    Command::none()
+                }
+            }
+            Message::PopupMessage(popup_msg) => {
+                if let Some(popup) = &mut self.popup {
+                    match popup_msg {
+                        PopupMessage::CopyFile => {
+                            self.popup = None;
+                            return Command::perform(async {}, |_| Message::CopySelected);
+                        }
+                        PopupMessage::CutFile => {
+                            self.popup = None;
+                            return Command::perform(async {}, |_| Message::CutSelected);
+                        }
+                        PopupMessage::PasteFile => {
+                            self.popup = None;
+                            return Command::perform(async {}, |_| Message::PasteSelected);
+                        }
+                        PopupMessage::CopyToClipboard(text) => {
+                            self.popup = None;
+                            return iced::clipboard::write(text);
+                        }
+                        PopupMessage::ClosePopup => {
+                            self.popup = None;
+                        }
+                        _ => {
+                            if let Some(new_path) = popup.update(popup_msg) {
+                                self.selected_file = Some(new_path);
+                                return self.refresh_current_directory();
+                            }
+                        }
+                    }
+                }
+                Command::none()
+            }
             Message::FileRightClicked(path, position) => {
-                self.popup = Some(PopupState {
+                let popup_state = PopupState {
                     file_path: path,
-                    position: self.calculate_popup_position(position),
-                });
+                    position: calculate_popup_position(position, self.window_size),
+                };
+                self.popup = Some(Popup::new(popup_state));
                 Command::none()
             }
             Message::FileHovered(path) => {
@@ -173,7 +265,7 @@ impl Application for FileManager {
                 self.hovered_file = None;
                 Command::none()
             }
-            Message::ClosePopup | Message::OverlayClicked => {
+            Message::OverlayClicked => {
                 self.popup = None;
                 Command::none()
             }
@@ -202,8 +294,8 @@ impl Application for FileManager {
                 Command::none()
             }
             Message::WindowResized(size) => {
-                self.window_size = size;
                 self.popup = None; // Close popup on window resize
+                self.window_size = size;
                 Command::none()
             }
             Message::FilesLoaded(result) => {
@@ -220,13 +312,15 @@ impl Application for FileManager {
                 }
                 Command::none()
             }
-            Message::StartRename(path) => self.start_rename(path),
-            Message::RenameInputChanged(input) => {
-                self.rename_input = input;
-                Command::none()
+            Message::NavigateBack => self.go_back(),
+            Message::NavigateForward => self.go_forward(),
+            Message::MouseButtonPressed(button) => {
+                match button {
+                    Button::Back => self.go_back(),
+                    Button::Forward => self.go_forward(),
+                    _ => Command::none(),
+                }
             }
-            Message::ConfirmRename => self.confirm_rename(),
-            Message::CancelRename => self.cancel_rename(),
         }
     }
 
@@ -238,15 +332,22 @@ impl Application for FileManager {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        if let Some(popup_state) = &self.popup {
-            // Create an overlay by wrapping main content with popup
-            let overlay = self.view_popup_overlay(popup_state);
-
-            // Use container to layer the popup over the main content
-            container(column![main_content, overlay])
+        if let Some(popup) = &self.popup {
+            let popup_view = popup.view().map(Message::PopupMessage);
+            // Create overlay
+            let overlay = container(popup_view)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into()
+                .style(iced::theme::Container::Custom(Box::new(OverlayStyle)));
+
+            // Layer the popup over the main content
+            container(column![
+                main_content,
+                mouse_area(overlay).on_press(Message::OverlayClicked)
+            ])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         } else {
             main_content.into()
         }
@@ -254,18 +355,35 @@ impl Application for FileManager {
 
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            keyboard::on_key_press(|key, _modifiers| {
-                if let keyboard::Key::Named(keyboard::key::Named::Backspace) = key {
-                    Some(Message::BackspacePressed)
-                } else if let keyboard::Key::Named(keyboard::key::Named::Escape) = key {
-                    Some(Message::ClosePopup)
-                } else {
-                    None
+            keyboard::on_key_press(|key, modifiers| {
+                match key {
+                    keyboard::Key::Character(c) if modifiers.command() => match c.as_str() {
+                        "c" => Some(Message::CopySelected),
+                        "x" => Some(Message::CutSelected),
+                        "v" => Some(Message::PasteSelected),
+                        _ => None,
+                    },
+                    keyboard::Key::Named(keyboard::key::Named::Backspace) => {
+                        Some(Message::BackspacePressed)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::F2) => {
+                        Some(Message::PopupMessage(PopupMessage::StartRename))
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                        Some(Message::PopupMessage(PopupMessage::ClosePopup))
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::F5) => {
+                        Some(Message::Refresh)
+                    }
+                    _ => {None}
                 }
             }),
             iced::event::listen_with(|event, _status| match event {
                 Event::Mouse(mouse::Event::CursorMoved { position }) => {
                     Some(Message::MouseMoved(position))
+                }
+                Event::Mouse(mouse::Event::ButtonPressed(button)) => {
+                    Some(Message::MouseButtonPressed(button))
                 }
                 Event::Window(_id, iced::window::Event::Resized { width, height }) => Some(
                     Message::WindowResized(Size::new(width as f32, height as f32)),
@@ -277,29 +395,80 @@ impl Application for FileManager {
 }
 
 impl FileManager {
+    // Update the navigate_to_path method to use the history
     fn navigate_to_path(&mut self, path: PathBuf) -> Command<Message> {
-        self.current_path = path;
+        self.add_to_history(path.clone());
+        self.navigate_to_path_internal(path)
+    }
+
+    fn add_to_history(&mut self, path: PathBuf) {
+        // If we're not at the end of history, truncate the future history
+        if self.history_index + 1 < self.history.len() {
+            self.history.truncate(self.history_index + 1);
+        }
+        
+        // Add new path to history
+        self.history.push(path);
+        
+        // Enforce max history size
+        if self.history.len() > self.max_history {
+            self.history.remove(0);
+        } else {
+            self.history_index = self.history.len() - 1;
+        }
+    }
+    
+    fn can_go_back(&self) -> bool {
+        self.history_index > 0
+    }
+    
+    fn can_go_forward(&self) -> bool {
+        self.history_index + 1 < self.history.len()
+    }
+    
+    fn go_back(&mut self) -> Command<Message> {
+        if self.can_go_back() {
+            self.history_index -= 1;
+            let path = self.history[self.history_index].clone();
+            self.navigate_to_path_internal(path)
+        } else {
+            Command::none()
+        }
+    }
+    
+    fn go_forward(&mut self) -> Command<Message> {
+        if self.can_go_forward() {
+            self.history_index += 1;
+            let path = self.history[self.history_index].clone();
+            self.navigate_to_path_internal(path)
+        } else {
+            Command::none()
+        }
+    }
+    
+    fn navigate_to_path_internal(&mut self, path: PathBuf) -> Command<Message> {
+        self.popup = None;
+        self.current_path = path.clone();
         self.selected_file = None;
         self.error_message = None;
-        self.path_input = self.current_path.to_string_lossy().to_string();
+        self.path_input = path.to_string_lossy().to_string();
         self.cached_files = None;
         self.scroll_offset = 0.0;
         self.loading = true;
-        self.popup = None;
-        helper::load_files_sync(self.current_path.clone(), self.show_hidden)
+        helper::load_files_sync(path, self.show_hidden)
     }
 
     fn refresh_current_directory(&mut self) -> Command<Message> {
+        self.popup = None;
         self.cached_files = None;
         self.error_message = None;
         self.loading = true;
-        self.popup = None;
         helper::load_files_sync(self.current_path.clone(), self.show_hidden)
     }
 
     fn delete_file(&mut self, path: PathBuf) -> Command<Message> {
-        self.error_message = None;
         self.popup = None;
+        self.error_message = None;
         let result = if path.is_dir() {
             fs::remove_dir_all(&path)
         } else {
@@ -357,10 +526,33 @@ impl FileManager {
 
         let up_button = button("Up").on_press(Message::NavigateUp).padding(8);
         let home_button = button("Home").on_press(Message::NavigateHome).padding(8);
+        let back_button = button("<")
+            .on_press_maybe(self.can_go_back().then_some(Message::NavigateBack))
+            .padding(8)
+            .style(if self.can_go_back() {
+                iced::theme::Button::Primary
+            } else {
+                iced::theme::Button::Secondary
+            });
+        let forward_button = button(">")
+            .on_press_maybe(self.can_go_forward().then_some(Message::NavigateForward))
+            .padding(8)
+            .style(if self.can_go_forward() {
+                iced::theme::Button::Primary
+            } else {
+                iced::theme::Button::Secondary
+            });
+
         let hidden_checkbox =
             checkbox("Show hidden", self.show_hidden).on_toggle(|_| Message::ToggleHidden);
 
-        let nav_row = row![delete_button, up_button, home_button, hidden_checkbox]
+        let nav_row = row![
+            delete_button,
+            up_button,
+            home_button,
+            back_button,
+            forward_button,
+            hidden_checkbox]
             .spacing(8)
             .align_items(Alignment::Center);
 
@@ -385,14 +577,14 @@ impl FileManager {
 
         let name_header = text("Name")
             .style(iced::theme::Text::Color(header_color))
-            .width(Length::FillPortion(self.columns.name as u16));
+            .width(Length::FillPortion(self.columns.name() as u16));
         let date_header = text("Modified")
             .style(iced::theme::Text::Color(header_color))
-            .width(Length::FillPortion(self.columns.date as u16))
+            .width(Length::FillPortion(self.columns.date() as u16))
             .horizontal_alignment(alignment::Horizontal::Center);
         let size_header = text("Size")
             .style(iced::theme::Text::Color(header_color))
-            .width(Length::FillPortion(self.columns.size as u16))
+            .width(Length::FillPortion(self.columns.size() as u16))
             .horizontal_alignment(alignment::Horizontal::Right);
 
         row![name_header, date_header, size_header]
@@ -422,7 +614,7 @@ impl FileManager {
                 if self.show_hidden {
                     files.iter().collect()
                 } else {
-                    files.iter().filter(|f| !f.is_hidden).collect()
+                    files.iter().filter(|f| !f.is_hidden()).collect()
                 }
             }
             None => {
@@ -464,36 +656,36 @@ impl FileManager {
     }
 
     fn view_file_row(&self, file: FileEntry) -> Element<Message> {
-        let is_selected = self.selected_file.as_ref() == Some(&file.path);
+        let is_selected = self.selected_file.as_ref() == Some(&file.path());
 
-        let (prefix, text_color) = if file.is_dir {
+        let (prefix, text_color) = if file.is_dir() {
             ("[DIR]", iced::Color::from_rgb(0.5, 0.7, 1.0))
         } else {
             ("", iced::Color::from_rgb(0.7, 0.7, 0.8))
         };
 
-        let name_text = if file.is_dir {
-            format!("{} {}", prefix, file.display_name)
+        let name_text = if file.is_dir() {
+            format!("{} {}", prefix, file.display_name())
         } else {
-            file.display_name.clone()
+            file.display_name().clone()
         };
 
         let name = text(name_text)
             .style(iced::theme::Text::Color(text_color))
-            .width(Length::FillPortion(self.columns.name as u16));
+            .width(Length::FillPortion(self.columns.name() as u16));
 
-        let modified = text(&file.modified)
+        let modified = text(&file.modified())
             .style(iced::theme::Text::Color(iced::Color::from_rgb(
                 0.6, 0.6, 0.7,
             )))
-            .width(Length::FillPortion(self.columns.date as u16))
+            .width(Length::FillPortion(self.columns.date() as u16))
             .horizontal_alignment(alignment::Horizontal::Center);
 
-        let size = text(&file.size)
+        let size = text(&file.size())
             .style(iced::theme::Text::Color(iced::Color::from_rgb(
                 0.6, 0.6, 0.7,
             )))
-            .width(Length::FillPortion(self.columns.size as u16))
+            .width(Length::FillPortion(self.columns.size() as u16))
             .horizontal_alignment(alignment::Horizontal::Right);
 
         let row_content = row![name, modified, size]
@@ -507,7 +699,7 @@ impl FileManager {
             iced::theme::Container::Transparent
         };
 
-        let file_path = file.path.clone();
+        let file_path = file.path().clone();
 
         let content_container = container(row_content)
             .style(container_style)
@@ -523,316 +715,6 @@ impl FileManager {
             .on_enter(Message::FileHovered(file_path))
             .on_exit(Message::FileUnhovered)
             .into()
-    }
-
-    fn view_popup_overlay(&self, popup_state: &PopupState) -> Element<Message> {
-        let path = popup_state.file_path.to_string_lossy().to_string();
-        let is_dir = popup_state.file_path.is_dir();
-
-        let mut popup_buttons = vec![
-            button("Copy Path")
-                .on_press(Message::CopyToClipboard(path))
-                .padding([4, 8])
-                .style(iced::theme::Button::Secondary)
-                .into(), // Convert Button to Element
-            button("Close")
-                .on_press(Message::ClosePopup)
-                .padding([4, 8])
-                .style(iced::theme::Button::Secondary)
-                .into() // Convert Button to Element
-        ];
-
-        // Add rename button if not already renaming
-        if self.renaming_file.as_ref() != Some(&popup_state.file_path) {
-            popup_buttons.insert(0, 
-                button("Rename")
-                    .on_press(Message::StartRename(popup_state.file_path.clone()))
-                    .padding([4, 8])
-                    .style(iced::theme::Button::Secondary)
-                    .into() // Convert Button to Element
-            );
-        }
-
-        // Create the popup content
-        let popup_content = container(
-            column![
-                text(format!("{}:", if is_dir { "Folder" } else { "File" }))
-                    .style(iced::theme::Text::Color(iced::Color::from_rgb(
-                        0.9, 0.9, 1.0
-                    )))
-                    .size(14),
-                text(
-                    &popup_state
-                        .file_path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                )
-                .style(iced::theme::Text::Color(iced::Color::from_rgb(
-                    0.7, 0.7, 0.8
-                )))
-                .size(12),
-                // Show rename input if this is the file being renamed
-                if self.renaming_file.as_ref() == Some(&popup_state.file_path) {
-                    column![
-                        text_input("New name", &self.rename_input)
-                            .on_input(Message::RenameInputChanged)
-                            .on_submit(Message::ConfirmRename)
-                            .padding(4),
-                        row![
-                            button("Confirm")
-                                .on_press(Message::ConfirmRename)
-                                .padding([4, 8])
-                                .style(iced::theme::Button::Primary),
-                            button("Cancel")
-                                .on_press(Message::CancelRename)
-                                .padding([4, 8])
-                                .style(iced::theme::Button::Secondary)
-                        ].spacing(8),
-                        if let Some(err) = &self.rename_error {
-                            text(err)
-                                .style(iced::theme::Text::Color(iced::Color::from_rgb8(255, 100, 100)))
-                                .size(12)
-                        } else {
-                            text("").size(0) // Empty placeholder
-                        }
-                    ].spacing(8)
-                } else {
-                    column![].spacing(0)
-                },
-                row(popup_buttons).spacing(8)
-            ]
-            .spacing(8)
-            .padding(12),
-        );
-
-
-
-        // Position the popup using padding (as you were doing)
-        let positioned_popup = container(popup_content)
-            .width(Length::Shrink)
-            .height(Length::Shrink)
-            .style(iced::theme::Container::Transparent)
-            .padding([
-                popup_state.position.y as u16,
-                0,
-                0,
-                popup_state.position.x as u16,
-            ]);
-
-        // Create the overlay
-        let overlay = container(positioned_popup)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(iced::theme::Container::Custom(Box::new(OverlayStyle)));
-
-        // Make the overlay clickable to dismiss
-        mouse_area(overlay).on_press(Message::OverlayClicked).into()
-    }
-
-    fn calculate_popup_position(&self, click_position: Point) -> Point {
-        const POPUP_WIDTH: f32 = 200.0;
-        const POPUP_HEIGHT: f32 = 120.0;
-        const MARGIN: f32 = 10.0;
-
-        let mut x = click_position.x;
-        let mut y = click_position.y;
-
-        // Adjust X position to keep popup within window bounds
-        if x + POPUP_WIDTH > self.window_size.width {
-            x = self.window_size.width - POPUP_WIDTH - MARGIN;
-        }
-        if x < MARGIN {
-            x = MARGIN;
-        }
-
-        // Adjust Y position to keep popup within window bounds
-        if y + POPUP_HEIGHT > self.window_size.height {
-            y = self.window_size.height - POPUP_HEIGHT - MARGIN;
-        }
-        if y < MARGIN {
-            y = MARGIN;
-        }
-
-        Point::new(x, y - self.window_size.height / 2.0) // Add back the control panel height for final position
-    }
-
-    fn start_rename(&mut self, path: PathBuf) -> Command<Message> {
-        self.renaming_file = Some(path.clone());
-        self.rename_input = path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        self.rename_error = None;
-        Command::none()
-    }
-
-    fn confirm_rename(&mut self) -> Command<Message> {
-        if let Some(old_path) = self.renaming_file.take() {
-            let new_name = self.rename_input.trim();
-            
-            // Validate the new name
-            if new_name.is_empty() {
-                self.rename_error = Some("Name cannot be empty".to_string());
-                self.renaming_file = Some(old_path);
-                return Command::none();
-            }
-
-            // For directories, don't allow changing the extension
-            let new_path = if old_path.is_dir() {
-                old_path.parent().unwrap().join(new_name)
-            } else {
-                // For files, preserve the extension
-                if let Some(ext) = old_path.extension() {
-                    let mut new_name = new_name.to_string();
-                    if !new_name.ends_with(&format!(".{}", ext.to_string_lossy())) {
-                        new_name.push_str(&format!(".{}", ext.to_string_lossy()));
-                    }
-                    old_path.parent().unwrap().join(new_name)
-                } else {
-                    old_path.parent().unwrap().join(new_name)
-                }
-            };
-
-            // Check if the new path already exists
-            if new_path.exists() {
-                self.rename_error = Some("A file/folder with that name already exists".to_string());
-                self.renaming_file = Some(old_path);
-                return Command::none();
-            }
-
-            // Attempt to rename
-            match fs::rename(&old_path, &new_path) {
-                Ok(_) => {
-                    self.rename_input.clear();
-                    self.selected_file = Some(new_path);
-                    self.refresh_current_directory()
-                }
-                Err(e) => {
-                    self.rename_error = Some(format!("Error renaming: {}", e));
-                    self.renaming_file = Some(old_path);
-                    Command::none()
-                }
-            }
-        } else {
-            Command::none()
-        }
-    }
-
-    fn cancel_rename(&mut self) -> Command<Message> {
-        self.renaming_file = None;
-        self.rename_input.clear();
-        self.rename_error = None;
-        Command::none()
-    }
-}
-
-// Custom styles for the popup
-struct PopupStyle;
-
-impl iced::widget::container::StyleSheet for PopupStyle {
-    type Style = iced::Theme;
-
-    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        iced::widget::container::Appearance {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                0.2, 0.2, 0.3, 0.95,
-            ))),
-            border: iced::Border {
-                color: iced::Color::from_rgb(0.4, 0.4, 0.5),
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            shadow: iced::Shadow {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.3),
-                offset: iced::Vector::new(2.0, 2.0),
-                blur_radius: 10.0,
-            },
-            text_color: None,
-        }
-    }
-}
-
-// Custom style for the overlay background
-struct OverlayStyle;
-
-impl iced::widget::container::StyleSheet for OverlayStyle {
-    type Style = iced::Theme;
-
-    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        iced::widget::container::Appearance {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                0.0, 0.0, 0.0, 0.1,
-            ))),
-            border: iced::Border::default(),
-            shadow: iced::Shadow::default(),
-            text_color: None,
-        }
-    }
-}
-
-struct Columns {
-    name: f32,
-    date: f32,
-    size: f32,
-}
-
-impl Columns {
-    fn new() -> Self {
-        Self {
-            name: 50.0,
-            date: 25.0,
-            size: 20.0,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct FileEntry {
-    path: PathBuf,
-    display_name: String,
-    is_dir: bool,
-    modified: String,
-    size: String,
-    is_hidden: bool,
-}
-#[allow(dead_code)]
-impl FileEntry {
-    pub fn new(
-        path: PathBuf,
-        display_name: String,
-        is_dir: bool,
-        modified: String,
-        size: String,
-        is_hidden: bool,
-    ) -> Self {
-        Self{
-            path,
-            display_name,
-            is_dir,
-            modified,
-            size,
-            is_hidden,
-        }
-    }
-
-    pub fn path(&self) -> PathBuf {
-        self.path.clone()
-    }
-    pub fn display_name(&self) -> String {
-        self.display_name.clone()
-    }
-    pub fn is_dir(&self) -> bool {
-        self.is_dir
-    }
-    pub fn modified(&self) -> String {
-        self.modified.clone()
-    }
-    pub fn size(&self) -> String {
-        self.size.clone()
-    }
-    pub fn is_hidden(&self) -> bool {
-        self.is_hidden
     }
 }
 
@@ -852,9 +734,10 @@ impl Clone for FileManager {
             mouse_position: Point::ORIGIN,
             loading: self.loading,
             window_size: self.window_size,
-            renaming_file: None,
-            rename_input: String::new(),
-            rename_error: None,
+            clipboard: self.clipboard.clone(),
+            history: self.history.clone(),
+            history_index: self.history_index,
+            max_history: self.max_history,
         }
     }
 }

@@ -1,4 +1,85 @@
-use crate::file_manager::FileEntry;
+use std::path::Path;
+use std::io;
+use std::os::windows::fs::MetadataExt;
+
+
+
+pub struct Columns {
+    name: f32,
+    date: f32,
+    size: f32,
+}
+
+impl Columns {
+    pub fn new() -> Self {
+        Self {
+            name: 50.0,
+            date: 25.0,
+            size: 20.0,
+        }
+    }
+
+    pub fn name(&self) -> f32 {
+        self.name
+    }
+    pub fn date(&self) -> f32 {
+        self.date
+    }
+    pub fn size(&self) -> f32 {
+        self.size
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FileEntry {
+    path: PathBuf,
+    display_name: String,
+    is_dir: bool,
+    modified: String,
+    size: String,
+    is_hidden: bool,
+}
+#[allow(dead_code)]
+impl FileEntry {
+    pub fn new(
+        path: PathBuf,
+        display_name: String,
+        is_dir: bool,
+        modified: String,
+        size: String,
+        is_hidden: bool,
+    ) -> Self {
+        Self{
+            path,
+            display_name,
+            is_dir,
+            modified,
+            size,
+            is_hidden,
+        }
+    }
+
+    pub fn path(&self) -> PathBuf {
+        self.path.clone()
+    }
+    pub fn display_name(&self) -> String {
+        self.display_name.clone()
+    }
+    pub fn is_dir(&self) -> bool {
+        self.is_dir
+    }
+    pub fn modified(&self) -> String {
+        self.modified.clone()
+    }
+    pub fn size(&self) -> String {
+        self.size.clone()
+    }
+    pub fn is_hidden(&self) -> bool {
+        self.is_hidden
+    }
+}
+
+
 use crate::file_manager::Message;
 #[allow(unused_imports)]
 use iced::{
@@ -79,6 +160,19 @@ pub fn format_time(time: SystemTime) -> String {
     }
 }
 
+pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
+    fs::create_dir_all(&dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
 
 // Synchronous file loading for better performance on small directories
 pub fn load_files_sync(path: PathBuf, show_hidden: bool) -> Command<Message> {
@@ -90,7 +184,9 @@ pub fn load_files_sync(path: PathBuf, show_hidden: bool) -> Command<Message> {
     )
 }
 
-// Optimized directory loading
+
+/// Loads directory contents with proper hidden file checking and sorting
+// Optimized directory loading with concise hidden file handling
 pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
     let mut files = Vec::new();
     
@@ -107,10 +203,8 @@ pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<
             .to_string_lossy()
             .to_string();
         
-        let is_hidden = display_name.starts_with('.');
-        
-        // Skip hidden files if not showing them
-        if !show_hidden && is_hidden {
+        // Early continue if file is hidden and we're not showing hidden files
+        if !show_hidden && is_file_hidden(&entry)? {
             continue;
         }
 
@@ -127,6 +221,8 @@ pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<
         } else {
             helper::format_size(metadata.len())
         };
+
+        let is_hidden = is_file_hidden(&entry)?;  // We check again since we need it for FileEntry
 
         files.push(FileEntry::new(
             path,
@@ -148,4 +244,30 @@ pub fn load_directory_contents(path: &PathBuf, show_hidden: bool) -> Result<Vec<
     });
 
     Ok(files)
+}
+
+/// Proper cross-platform hidden file check
+fn is_file_hidden(entry: &fs::DirEntry) -> Result<bool, String> {
+    #[cfg(unix)]
+    {
+        // On Unix, check if filename starts with a dot
+        let name = entry.file_name();
+        let is_hidden = name.to_string_lossy().starts_with('.');
+        Ok(is_hidden)
+    }
+    
+    #[cfg(windows)]
+    {
+        // On Windows, check the hidden file attribute
+        let metadata = entry.metadata()
+            .map_err(|e| format!("Error reading metadata: {}", e))?;
+        Ok(metadata.file_attributes() & 0x2 != 0)
+    }
+    
+    #[cfg(not(any(unix, windows)))]
+    {
+        // For other platforms, fall back to dot file check
+        let name = entry.file_name();
+        Ok(name.to_string_lossy().starts_with('.'))
+    }
 }

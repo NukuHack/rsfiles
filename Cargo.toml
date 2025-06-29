@@ -2,6 +2,12 @@
 name = "rsfiles"
 version = "0.1.0"
 edition = "2024"
+authors = ["NukuHack", "nukuhack@gmail.com"] # might not be able to answer too quickly
+description = "Basic file-manager in rust"
+readme = true
+repository = "https://github.com/NukuHack/rsfiles"
+license = "MIT"
+keywords = ["file_system", "folder"]
 
 [dependencies]
 iced = "0.12"
@@ -13,3 +19,24 @@ walkdir = "2.4"
 
 [package.metadata.windows]
 icon = "assets/icon.ico"
+
+
+[profile.dev]
+opt-level = 1       # Light optimizations
+incremental = true  # Faster recompiles
+codegen-units = 16   # Parallel compilation
+
+[profile.dev.package."*"]
+opt-level = 1       # Apply to dependencies too
+
+
+[profile.release]
+opt-level = 3       # Optimize for speed (not size)
+incremental = false # Disabled (good for release)
+codegen-units = 4   # Balance compile time/optimization
+lto = true          # Link-time optimization (good)
+panic = "abort"     # Reduces binary size (good)
+strip = true        # Removes debug symbols (good)
+
+[profile.release.package."*"]
+opt-level = 3       # Apply to dependencies too

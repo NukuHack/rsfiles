@@ -1,15 +1,8 @@
-#[allow(unused_imports)]
-use iced::{
-    alignment, keyboard, mouse,
-    widget::{
-        button, checkbox, column, container, mouse_area, row, scrollable, scrollable::Viewport,
-        text, text_input, Column,
-    },
-    Alignment, Application, Command, Element, Event, Length, Point, Settings, Size, Subscription,
-    Theme,
-};
-#[allow(unused_imports)]
-use std::{env, fs, path::PathBuf, time::SystemTime};
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use iced::Settings;
+use iced::Size;
+use iced::Application;
+use std::env;
 
 mod file_manager;
 mod helper;

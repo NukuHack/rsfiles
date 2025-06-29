@@ -1,31 +1,21 @@
 
 
 i would like these buttons at the top :
-copy,paste,cut,new(folder and if hold down for long then a txt file) (if possible making a new file/folder will instantly go into renaming it)
-
-if i hold down a file / folder for long enough i can rename it
-if i remove the extension from the file or add an extension to a folder it reverses the renaming and other neat "limiting" qol features and error handling should be implemented
-
-next to the current "up" should be a "Back" and a "forward" so i would keep a list of what i visited last (like a 50 long history not more needed) (and make mouse button 4,and 5 as macro for those buttons)
+"new" button creating a folder and if hold down for long then a txt file (if possible making a new file/folder will instantly go into renaming it)
 
 make .ink files "open"-able so you can go to their directory
 
 make the popup correctly placed and not make a black overlay to the files
-make the popup have rename copy a paste (what is disabled if there is nothing to paste) a delete and if possible at the top an "Open" to open with the default stuff
 
-make the folder open only happen in quick double clicks not on every second click
+make the popup have "Open" button to open with the default stuff
 
 make the time function selectable
-
-make the path not reload the files if the path is the same as it was
 
 make the path open the file if it's pointing to an existing file (and even if there is no extension for the file)
 
 make Shift clicking on something paste it to the path and if it's a folder just open it but if it's a file enter the path so the user has to press an enter to run the action actually
 
-rightclicking the path would bring up a different menu with like Up,Back,Forward (default disabled only if the user used back will it have a meaning) and "open CMD here" and open recycle bin
-
-using F5 would trigger the reloading
+right-clicking the path would bring up a different menu with like Up,Back,Forward (default disabled only if the user used back will it have a meaning) and "open CMD here" and open recycle bin
 
 pulling a string onto the path textbox with the cursor would past it into the path
 and the user would be able to pull the path as a string out from the path textbox
@@ -58,7 +48,6 @@ Sorting options – By name, date, size, type (with a toggle for ascending/desce
 Ctrl+Backspace – Delete the last word in the path bar.
 
 Keyboard Shortcuts
-F2 → Rename
 Ctrl+A → Select All
 Del → Move to Recycle Bin
 Shift+Del → Permanent Delete
