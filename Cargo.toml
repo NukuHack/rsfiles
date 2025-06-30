@@ -16,6 +16,8 @@ dirs = "5"
 # For home directory access
 walkdir = "2.4"
 # for faster file and folder loading
+winapi = { version = "0.3", features = ["objbase", "combaseapi", "shlobj", "shobjidl", "objidl", "winerror"] }
+# for extra windows functionality
 
 [package.metadata.windows]
 icon = "assets/icon.ico"

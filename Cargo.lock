@@ -2054,6 +2054,7 @@ dependencies = [
  "dirs",
  "iced",
  "walkdir",
+ "winapi",
 ]
 
 [[package]]

@@ -1,4 +1,3 @@
-// main.rs
 use crate::helper::Columns;
 use crate::helper::FileEntry;
 use super::*;
@@ -150,11 +149,37 @@ impl Application for FileManager {
                 self.popup = None; // Close popup on any file interaction
                 
                 if self.selected_file.as_ref() == Some(&path) {
+                    // Second click on the same file
                     if path.is_dir() {
                         return self.navigate_to_path(path);
+                    } else if self.is_shortcut(&path) {
+                        // Handle .lnk files on second click
+                        if let Some(target_path) = self.resolve_shortcut(&path) {
+                            if target_path.exists() {
+                                if target_path.is_dir() {
+                                    // If shortcut points to a directory, navigate to it
+                                    return self.navigate_to_path(target_path);
+                                } else {
+                                    // If shortcut points to a file, update path bar to show the file's directory
+                                    // and optionally select the target file
+                                    if let Some(parent_dir) = target_path.parent() {
+                                        self.path_input = target_path.to_string_lossy().to_string();
+                                        return self.navigate_to_path(parent_dir.to_path_buf());
+                                    }
+                                }
+                            } else {
+                                self.error_message = Some(format!(
+                                    "Shortcut target does not exist: {}",
+                                    target_path.display()
+                                ));
+                            }
+                        } else {
+                            self.error_message = Some("Could not resolve shortcut".to_string());
+                        }
                     }
                     self.selected_file = None;
                 } else {
+                    // First click - just select the file
                     self.selected_file = Some(path);
                 }
                 Command::none()
@@ -660,11 +685,13 @@ impl FileManager {
 
         let (prefix, text_color) = if file.is_dir() {
             ("[DIR]", iced::Color::from_rgb(0.5, 0.7, 1.0))
+        } else if self.is_shortcut(&file.path()) {
+            ("[LNK]", iced::Color::from_rgb(1.0, 0.8, 0.5)) // Orange color for shortcuts
         } else {
             ("", iced::Color::from_rgb(0.7, 0.7, 0.8))
         };
 
-        let name_text = if file.is_dir() {
+        let name_text = if file.is_dir() || self.is_shortcut(&file.path()) {
             format!("{} {}", prefix, file.display_name())
         } else {
             file.display_name().clone()

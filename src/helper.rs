@@ -1,7 +1,135 @@
+
 use std::path::Path;
 use std::io;
 use std::os::windows::fs::MetadataExt;
 
+// Add this for Windows shortcut resolution
+#[cfg(windows)]
+use winapi::{
+    Interface,
+    um::{
+        objbase::CoInitialize,
+        combaseapi::{CoCreateInstance, CoUninitialize},
+        shobjidl_core::{IShellLinkW},
+        objidl::IPersistFile
+    },
+    shared::{
+        wtypesbase::CLSCTX_INPROC_SERVER,
+        winerror::{S_OK, S_FALSE},
+        guiddef::CLSID
+    }
+};
+
+#[cfg(windows)]
+const STGM_READ: u32 = 0x00000000;
+
+// Define CLSID_ShellLink
+#[cfg(windows)]
+const CLSID_SHELLLINK: CLSID = CLSID {
+    Data1: 0x00021401,
+    Data2: 0x0000,
+    Data3: 0x0000,
+    Data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+};
+
+impl super::file_manager::FileManager {
+    // Function to resolve Windows shortcut (.lnk) files
+    #[cfg(windows)]
+    pub fn resolve_shortcut(&self, lnk_path: &PathBuf) -> Option<PathBuf> {
+        use std::ptr;
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        
+        unsafe {
+            // Initialize COM
+            let hr = CoInitialize(ptr::null_mut());
+            if hr != S_OK && hr != S_FALSE { // S_FALSE means already initialized
+                return None;
+            }
+            
+            let mut shell_link: *mut IShellLinkW = ptr::null_mut();
+            let hr = CoCreateInstance(
+                &CLSID_SHELLLINK,
+                ptr::null_mut(),
+                CLSCTX_INPROC_SERVER,
+                &IShellLinkW::uuidof(),
+                &mut shell_link as *mut *mut IShellLinkW as *mut *mut _,
+            );
+            
+            if hr != S_OK || shell_link.is_null() {
+                CoUninitialize();
+                return None;
+            }
+            
+            // Query for IPersistFile interface
+            let mut persist_file: *mut IPersistFile = ptr::null_mut();
+            let hr = (*shell_link).QueryInterface(
+                &IPersistFile::uuidof(),
+                &mut persist_file as *mut *mut IPersistFile as *mut *mut _,
+            );
+            
+            if hr != S_OK || persist_file.is_null() {
+                (*shell_link).Release();
+                CoUninitialize();
+                return None;
+            }
+            
+            // Convert path to wide string
+            let wide_path: Vec<u16> = OsStr::new(lnk_path)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            
+            // Load the shortcut
+            let hr = (*persist_file).Load(wide_path.as_ptr(), STGM_READ);
+            if hr != S_OK {
+                (*persist_file).Release();
+                (*shell_link).Release();
+                CoUninitialize();
+                return None;
+            }
+            
+            // Resolve the link (this is important for shortcuts to folders)
+            let _ = (*shell_link).Resolve(ptr::null_mut(), 0);
+            
+            // Get the target path
+            let mut target_path = [0u16; winapi::shared::minwindef::MAX_PATH as usize];
+            let hr = (*shell_link).GetPath(target_path.as_mut_ptr(), target_path.len() as i32, ptr::null_mut(), STGM_READ);
+            
+            // Cleanup
+            (*persist_file).Release();
+            (*shell_link).Release();
+            CoUninitialize();
+            
+            if hr == S_OK {
+                // Convert wide string back to PathBuf
+                let len = target_path.iter().position(|&x| x == 0).unwrap_or(0);
+                if len > 0 {
+                    let target_string = String::from_utf16_lossy(&target_path[..len]);
+                    Some(PathBuf::from(target_string))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    }
+    
+    // For non-Windows platforms, return None
+    #[cfg(not(windows))]
+    pub fn resolve_shortcut(&self, _lnk_path: &PathBuf) -> Option<PathBuf> {
+        None
+    }
+    
+    // Helper function to check if a file is a shortcut
+    pub fn is_shortcut(&self, path: &PathBuf) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("lnk"))
+            .unwrap_or(false)
+    }
+}
 
 
 pub struct Columns {
