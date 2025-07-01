@@ -19,11 +19,9 @@ pub enum PopupMessage {
     RenameInputChanged(String),
     ConfirmRename,
     CancelRename,
-    CopyFile,
-    CutFile,
-    PasteFile,
 }
 
+#[derive(Clone)]
 pub struct Popup {
     state: PopupState,
     renaming: bool,
@@ -134,33 +132,6 @@ impl Popup {
             );
         }
 
-        /*
-        // Add new buttons
-        popup_buttons.insert(
-                0,
-            button("Copy")
-                .on_press(PopupMessage::CopyFile)
-                .padding([4, 8])
-                .style(iced::theme::Button::Secondary)
-                .into(),
-        );
-        popup_buttons.insert(
-                0,
-            button("Cut")
-                .on_press(PopupMessage::CutFile)
-                .padding([4, 8])
-                .style(iced::theme::Button::Secondary)
-                .into(),
-        );
-        popup_buttons.insert(
-                0,
-            button("Paste")
-                .on_press(PopupMessage::PasteFile)
-                .padding([4, 8])
-                .style(iced::theme::Button::Secondary)
-                .into(),
-        );
-        */
         let popup_content = container(
             column![
                 text(format!("{}:", if is_dir { "Folder" } else { "File" }))

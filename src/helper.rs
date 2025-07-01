@@ -123,6 +123,7 @@ pub fn resolve_shortcut(_lnk_path: &PathBuf) -> Option<PathBuf> {
     None
 }
 
+#[derive(Clone)]
 pub struct Columns {
     name: f32,
     date: f32,
