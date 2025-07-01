@@ -1,20 +1,18 @@
-use crate::helper::Columns;
-use crate::helper::FileEntry;
+
 use super::*;
-use iced::widget::scrollable;
-use iced::widget::scrollable::Viewport;
-use iced::{alignment, keyboard, mouse};
+use super::helper::{PathExt, Columns, FileEntry, copy_dir_all};
+use super::popup::{Popup, PopupMessage, PopupState, OverlayStyle, calculate_popup_position};
 use iced::{
+    alignment, keyboard, mouse, mouse::Button,
     widget::{
+        scrollable,
+        scrollable::Viewport,
         button, checkbox, column, container, mouse_area, row, text, text_input, Column,
     },
     Alignment, Application, Command, Element, Event, Length, Point, Size, Subscription, Theme,
 };
-use iced::mouse::Button;
 use std::{fs, path::PathBuf, time::SystemTime};
-use crate::helper::copy_dir_all;
 
-use super::popup::{Popup, PopupMessage, PopupState, OverlayStyle, calculate_popup_position};
 
 pub struct FileManager {
     current_path: PathBuf,
@@ -77,7 +75,7 @@ impl Application for FileManager {
             .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
         let path_input = current_path.to_string_lossy().to_string();
 
-        let load_command = helper::load_files_sync(current_path.clone(), false);
+        let load_command = helper::load_files_sync(current_path.clone());
 
         (
             Self {
@@ -143,7 +141,7 @@ impl Application for FileManager {
             }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
-                self.refresh_current_directory()
+                Command::none()
             }
             Message::FileLeftClicked(path) => {
                 self.popup = None; // Close popup on any file interaction
@@ -152,9 +150,9 @@ impl Application for FileManager {
                     // Second click on the same file
                     if path.is_dir() {
                         return self.navigate_to_path(path);
-                    } else if self.is_shortcut(&path) {
+                    } else if path.is_shortcut() {
                         // Handle .lnk files on second click
-                        if let Some(target_path) = self.resolve_shortcut(&path) {
+                        if let Some(target_path) = helper::resolve_shortcut(&path) {
                             if target_path.exists() {
                                 if target_path.is_dir() {
                                     // If shortcut points to a directory, navigate to it
@@ -472,23 +470,19 @@ impl FileManager {
     }
     
     fn navigate_to_path_internal(&mut self, path: PathBuf) -> Command<Message> {
-        self.popup = None;
         self.current_path = path.clone();
-        self.selected_file = None;
-        self.error_message = None;
         self.path_input = path.to_string_lossy().to_string();
-        self.cached_files = None;
-        self.scroll_offset = 0.0;
-        self.loading = true;
-        helper::load_files_sync(path, self.show_hidden)
+        self.refresh_current_directory()
     }
 
     fn refresh_current_directory(&mut self) -> Command<Message> {
         self.popup = None;
-        self.cached_files = None;
+        self.selected_file = None;
         self.error_message = None;
+        self.cached_files = None;
+        self.scroll_offset = 0.0;
         self.loading = true;
-        helper::load_files_sync(self.current_path.clone(), self.show_hidden)
+        helper::load_files_sync(self.current_path.clone())
     }
 
     fn delete_file(&mut self, path: PathBuf) -> Command<Message> {
@@ -685,13 +679,13 @@ impl FileManager {
 
         let (prefix, text_color) = if file.is_dir() {
             ("[DIR]", iced::Color::from_rgb(0.5, 0.7, 1.0))
-        } else if self.is_shortcut(&file.path()) {
+        } else if file.is_shortcut() {
             ("[LNK]", iced::Color::from_rgb(1.0, 0.8, 0.5)) // Orange color for shortcuts
         } else {
             ("", iced::Color::from_rgb(0.7, 0.7, 0.8))
         };
 
-        let name_text = if file.is_dir() || self.is_shortcut(&file.path()) {
+        let name_text = if file.is_dir() || file.is_shortcut() {
             format!("{} {}", prefix, file.display_name())
         } else {
             file.display_name().clone()
