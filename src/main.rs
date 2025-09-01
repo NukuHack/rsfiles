@@ -5,6 +5,7 @@ mod file_manager;
 mod helper;
 mod popup;
 mod navigation;
+mod delete;
 
 fn main() -> iced::Result {
 	file_manager::FileManager::run(Settings {

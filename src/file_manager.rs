@@ -15,34 +15,34 @@ use iced::{
 use std::{fs, path::PathBuf, time::SystemTime};
 
 pub struct FileManager {
-	navigation: NavigationState,
-	ui_state: UIState,
-	clipboard: Option<ClipboardItem>,
-	files: FileCache,
+	pub navigation: NavigationState,
+	pub ui_state: UIState,
+	pub clipboard: Option<ClipboardItem>,
+	pub files: FileCache,
 }
 
 #[derive(Clone)]
-struct UIState {
-	selected_file: Option<PathBuf>,
-	hovered_file: Option<PathBuf>,
-	error_message: Option<String>,
-	show_hidden: bool,
-	columns: Columns,
-	scroll_offset: f32,
-	popup: Option<Popup>,
-	mouse_position: Point,
-	loading: bool,
-	window_size: Size,
+pub struct UIState {
+	pub selected_file: Option<PathBuf>,
+	pub hovered_file: Option<PathBuf>,
+	pub error_message: Option<String>,
+	pub show_hidden: bool,
+	pub columns: Columns,
+	pub scroll_offset: f32,
+	pub popup: Option<Popup>,
+	pub mouse_position: Point,
+	pub loading: bool,
+	pub window_size: Size,
 }
 
 #[derive(Clone)]
-struct ClipboardItem {
+pub struct ClipboardItem {
 	path: PathBuf,
 	is_cut: bool,
 }
 
 #[derive(Clone)]
-struct FileCache {
+pub struct FileCache {
 	cached_files: Option<(PathBuf, Vec<FileEntry>, SystemTime)>,
 }
 
@@ -88,7 +88,7 @@ pub enum Message {
 }
 
 impl UIState {
-	fn new() -> Self {
+	pub fn new() -> Self {
 		Self {
 			selected_file: None,
 			hovered_file: None,
@@ -103,14 +103,14 @@ impl UIState {
 		}
 	}
 
-	fn clear_transient_state(&mut self) {
+	pub fn clear_transient_state(&mut self) {
 		self.popup = None;
 		self.selected_file = None;
 		self.error_message = None;
 		self.scroll_offset = 0.0;
 	}
 
-	fn set_error(&mut self, message: String) {
+	pub fn set_error(&mut self, message: String) {
 		self.error_message = Some(message);
 	}
 }
@@ -497,13 +497,13 @@ impl FileManager {
 	}
 
 	// Utility methods
-	fn navigate_to_path(&mut self, path: PathBuf) -> Command<Message> {
+	pub fn navigate_to_path(&mut self, path: PathBuf) -> Command<Message> {
 		self.navigation.update_current_scroll(self.ui_state.scroll_offset);
 		self.navigation.navigate_to(path);
 		self.refresh_directory()
 	}
 
-	fn refresh_directory(&mut self) -> Command<Message> {
+	pub fn refresh_directory(&mut self) -> Command<Message> {
 		self.ui_state.clear_transient_state();
 		self.files.clear();
 		self.ui_state.loading = true;
@@ -515,32 +515,6 @@ impl FileManager {
 			copy_dir_all(source, dest)
 		} else {
 			fs::copy(source, dest).map(|_| ())
-		}
-	}
-
-	fn delete_file(&mut self, path: PathBuf) -> Command<Message> {
-		self.ui_state.popup = None;
-		self.ui_state.error_message = None;
-		
-		let result = if path.is_dir() {
-			fs::remove_dir_all(&path)
-		} else {
-			fs::remove_file(&path)
-		};
-
-		match result {
-			Ok(_) => {
-				self.ui_state.selected_file = None;
-				self.refresh_directory()
-			}
-			Err(e) => {
-				self.ui_state.set_error(format!(
-					"Error deleting {}: {}",
-					if path.is_dir() { "folder" } else { "file" },
-					e
-				));
-				Command::none()
-			}
 		}
 	}
 
