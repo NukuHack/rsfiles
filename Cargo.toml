@@ -19,6 +19,16 @@ walkdir = "2.4"
 winapi = { version = "0.3", features = ["objbase", "combaseapi", "shlobj", "shobjidl", "objidl", "winerror"] }
 # for extra windows functionality
 
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "winbase",
+    "winnt", 
+    "handleapi",
+    "processthreadsapi",
+    "securitybaseapi",
+    "errhandlingapi"
+] }
+
 [package.metadata.windows]
 icon = "assets/icon.ico"
 

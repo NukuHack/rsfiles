@@ -9,6 +9,7 @@ use iced::{
 		scrollable::Viewport,
 		button, checkbox, column, container, mouse_area, row, text, text_input, Column,
 	},
+	theme::Text::Color,
 	Alignment, Application, Command, Element, Event, Length, Point, Size, Subscription, Theme,
 };
 use std::{fs, path::PathBuf, time::SystemTime};
@@ -188,7 +189,13 @@ impl Application for FileManager {
 				self.ui_state.hovered_file = None;
 				Command::none()
 			}
-			Message::DeleteSelected => self.handle_delete(),
+			Message::DeleteSelected => {
+				if let Some(selected) = &self.ui_state.selected_file {
+					self.delete_file(selected.clone())
+				} else {
+					Command::none()
+				}
+			},
 
 			// Clipboard operations
 			Message::CopySelected => self.handle_copy(),
@@ -439,14 +446,6 @@ impl FileManager {
 		}
 	}
 
-	fn handle_delete(&mut self) -> Command<Message> {
-		if let Some(selected) = &self.ui_state.selected_file {
-			self.delete_file(selected.clone())
-		} else {
-			Command::none()
-		}
-	}
-
 	fn handle_mouse_button(&mut self, button: Button) -> Command<Message> {
 		match button {
 			Button::Back => self.handle_navigate_back(),
@@ -605,7 +604,7 @@ impl FileManager {
 
 		let error_or_headers = if let Some(err) = &self.ui_state.error_message {
 			text(err)
-				.style(iced::theme::Text::Color(iced::Color::from_rgb8(255, 100, 100)))
+				.style(Color(iced::Color::from_rgb8(255, 100, 100)))
 				.into()
 		} else {
 			self.view_table_headers()
@@ -631,18 +630,11 @@ impl FileManager {
 	}
 
 	fn create_delete_button(&self) -> Element<Message> {
-		if self.ui_state.selected_file.is_some() {
-			button(text("Delete").style(iced::theme::Text::Color(iced::Color::from_rgb(0.9, 0.9, 0.9))))
-				.style(iced::theme::Button::Destructive)
-				.padding(8)
-				.on_press(Message::DeleteSelected)
-				.into() // Add .into() to convert Button to Element
-		} else {
-			button(text("Delete").style(iced::theme::Text::Color(iced::Color::from_rgb(0.5, 0.5, 0.5))))
-				.style(iced::theme::Button::Secondary)
-				.padding(8)
-				.into() // Add .into() to convert Button to Element
-		}
+		button(text("Delete").style(Color(iced::Color::from_rgb(0.9, 0.9, 0.9))))
+			.style(iced::theme::Button::Destructive)
+			.padding(8)
+			.on_press(Message::DeleteSelected)
+			.into() // Add .into() to convert Button to Element
 	}
 
 	fn create_history_buttons(&self) -> (Element<Message>, Element<Message>) {
@@ -673,14 +665,14 @@ impl FileManager {
 		let header_color = iced::Color::from_rgb(0.6, 0.6, 0.7);
 
 		let name_header = text("Name")
-			.style(iced::theme::Text::Color(header_color))
+			.style(Color(header_color))
 			.width(Length::FillPortion(self.ui_state.columns.name() as u16));
 		let date_header = text("Modified")
-			.style(iced::theme::Text::Color(header_color))
+			.style(Color(header_color))
 			.width(Length::FillPortion(self.ui_state.columns.date() as u16))
 			.horizontal_alignment(alignment::Horizontal::Center);
 		let size_header = text("Size")
-			.style(iced::theme::Text::Color(header_color))
+			.style(Color(header_color))
 			.width(Length::FillPortion(self.ui_state.columns.size() as u16))
 			.horizontal_alignment(alignment::Horizontal::Right);
 
@@ -705,7 +697,7 @@ impl FileManager {
 	fn create_loading_view(&self) -> Element<Message> {
 		container(
 			text("Loading...")
-				.style(iced::theme::Text::Color(iced::Color::from_rgb(0.7, 0.7, 0.8)))
+				.style(Color(iced::Color::from_rgb(0.7, 0.7, 0.8)))
 				.size(16),
 		)
 		.width(Length::Fill)
@@ -721,7 +713,7 @@ impl FileManager {
 				"Could not read directory contents: {}",
 				self.navigation.current_path.display()
 			))
-			.style(iced::theme::Text::Color(iced::Color::from_rgb8(255, 100, 100))),
+			.style(Color(iced::Color::from_rgb8(255, 100, 100))),
 		)
 		.width(Length::Fill)
 		.height(Length::Fill)
@@ -792,16 +784,16 @@ impl FileManager {
 
 	fn create_file_row_content(&self, name_text: String, text_color: iced::Color, file: &FileEntry) -> Element<Message> {
 		let name = text(name_text)
-			.style(iced::theme::Text::Color(text_color))
+			.style(Color(text_color))
 			.width(Length::FillPortion(self.ui_state.columns.name() as u16));
 
 		let modified = text(&file.modified())
-			.style(iced::theme::Text::Color(iced::Color::from_rgb(0.6, 0.6, 0.7)))
+			.style(Color(iced::Color::from_rgb(0.6, 0.6, 0.7)))
 			.width(Length::FillPortion(self.ui_state.columns.date() as u16))
 			.horizontal_alignment(alignment::Horizontal::Center);
 
 		let size = text(&file.size())
-			.style(iced::theme::Text::Color(iced::Color::from_rgb(0.6, 0.6, 0.7)))
+			.style(Color(iced::Color::from_rgb(0.6, 0.6, 0.7)))
 			.width(Length::FillPortion(self.ui_state.columns.size() as u16))
 			.horizontal_alignment(alignment::Horizontal::Right);
 
